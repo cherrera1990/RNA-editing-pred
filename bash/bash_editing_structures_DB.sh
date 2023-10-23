@@ -1,0 +1,4 @@
+nohup ./editing_structures_DB_v2.x hg38_editing_lines_RS structures/hg38_premrna_struct_RS_annot -s 50 > hg38_editing_structures_RS_DB_v2_50_3 2> hg38_RS_DB_50_3.log &
+nohup ./editing_structures_DB_v2.x hg38_editing_lines_RS structures/hg38_premrna_struct_RS_annot -s 200 > hg38_editing_structures_RS_DB_v2_200_3 2> hg38_RS_DB_200_3.log &
+nohup ./editing_structures_DB_v2.x hg38_editing_lines_RS structures/hg38_premrna_struct_RS_annot -s 500 > hg38_editing_structures_RS_DB_v2_500_3 2> hg38_RS_DB_500_3.log &
+nohup ./editing_structures_DB_v2.x hg38_editing_lines_RS structures/hg38_premrna_struct_RS_annot -s 1000 > hg38_editing_structures_RS_DB_v2_1000_3 2> hg38_RS_DB_1000_3.log &
