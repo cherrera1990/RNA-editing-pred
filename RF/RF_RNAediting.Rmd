@@ -1,0 +1,808 @@
+---
+title: 'Determination of edited vs non-edited Adenosine in RNA with Random Forests'
+subtitle: '`r paste("File processed:", unlist(strsplit(params$file1,"_DB_"))[2])`'
+date: '`r format(Sys.Date(),"%e de %B, %Y")`' 
+# date: \today  (solo para pdf)
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_float: true
+    theme: united
+    highlight: tango
+  pdf_document:
+    keep_tex: yes
+    toc: yes
+    df_print: kable
+    highlight: haddock
+#nocite: |
+header-includes:
+  - \usepackage[spanish]{babel}
+params:
+  file1: "ttr_editing_structures_DB_v2_1000_5_rand10000"
+  
+  file0: "ttr_non_editing_NE_NES_structures_DB_v2_1000_5_rand10000"
+  folder.data: "data3/trachurus_trachurus/small_datasets"  
+  out_folder: "report3_trachurus_trachurus"
+  ID: !r c("TranscriptId",    "PosInTranscript")
+  var.menos1: !r c(35,40,45,53,61,69,77,85,93,97,101,105)
+  p.train: !r 2/3
+  seed.train: 12345
+  seed.clsfier: 1234567
+  repl: 30  # robustness
+  nvar: 7   # robustness
+
+geometry: margin=2cm
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment = NULL, prompt = TRUE,  tidy.opts=list(width.cutoff=80),tidy=TRUE, 
+               fig.width = 7, fig.height = 7,echo = FALSE, 
+               message = FALSE, warning = FALSE, cache=FALSE, out.extra = "")
+```
+
+
+
+
+
+
+```{r libraries, echo=FALSE,message=FALSE}
+libraries <- c("caret","stringr",
+               "knitr","randomForest",
+               "naniar","kableExtra","summarytools")
+check.libraries <- is.element(libraries, installed.packages()[, 1])==FALSE
+libraries.to.install <- libraries[check.libraries]
+if (length(libraries.to.install!=0)) {
+  install.packages(libraries.to.install)
+}
+success <- sapply(libraries,require, quietly = FALSE,  character.only = TRUE)
+if(length(success) != length(libraries)) {stop("A package failed to return a success in require() function.")}
+```
+
+
+
+```{r}
+# Function to show a tree
+source("PlotRF_tree.R")
+```
+
+
+
+```{r}
+# Read
+df1 <- read.delim(file.path(params$folder.data,params$file1),
+                  header=T)
+df0 <- read.delim(file.path(params$folder.data,params$file0), 
+                  header=T)
+
+
+
+```
+
+
+
+
+
+
+
+\newpage 
+
+# Introduction
+
+Our goal is to create a random forest classifier to classify edited vs non-edited Adenosine (A).
+
+The data is splited in two files, one with the sequences of edited  A and the other with tthe sequences of non-edited A:
+
+
+**`r params$file1`** 
+
+**`r params$file0`**
+
+The dimension of the first file is: `r dim(df1)`.
+
+The dimension of the second file is: `r dim(df0)`.
+
+El método a usar será random forest.
+
+# Random selection non-editing observations
+
+Equal number of edited/non-edited observations in A are selected
+
+
+```{r}
+set.seed <- 1234
+if (nrow(df0) > nrow(df1)) {
+  idx <- sample(1:nrow(df0), nrow(df1))
+  df0 <- df0[idx,]
+}
+```
+
+
+# Join de files
+
+```{r}
+# check
+kk <-names(df1)==names(df0)
+n.kk <- sum(!kk)
+kkpos <- which(!kk)
+```
+
+
+There are `r n.kk` variables with different names:
+
+
+
+```{r}
+# check
+kk <-names(df1)==names(df0)
+n.kk <- sum(!kk)
+kkpos <- which(!kk)
+names(df0)[!kk]
+names(df1)[!kk]
+names(df0)[kkpos+1]
+names(df1)[kkpos+1]
+
+# correction
+names(df1)[!kk] <- names(df0)[!kk]
+
+# join files
+df<-rbind(df1,df0)
+
+
+```
+
+
+
+
+
+
+
+# Descriptive statistic
+
+
+```{r}
+summary(df)
+```
+
+
+
+
+
+
+
+# Variables with values -1
+
+
+```{r, PROVES}
+#summary(df[,params$var.menos1])
+
+# 
+# params$var.menos1+1 ya que a df se 
+# añadido la columna y en primera posición 
+
+count.menos1 <-
+df %>%
+  select(names(df)[3:155]) %>%
+  summarise_all(~sum(.x == -1))
+
+#count.menos1[,which(count.menos1>0)]
+
+#names(df)[str_detect(names(df),"Closest")]
+
+#pruebas
+#sum(df$X3ClosestSSSize < 2)
+```
+
+
+All variables containing at least a -1 value are displayed. In total they are 
+`r length (count.menos1[,which(count.menos1>0)])`.
+
+
+These variables are displayed:
+
+
+```{r}
+count.menos1[,which(count.menos1>0)]
+```
+
+
+
+
+# Add the class variable 
+
+The class variable is **y** will have the value **1** for *edited A* and **0** for *non-edited A*.
+
+
+```{r}
+# Add class variable
+y<-factor(c(rep(1,nrow(df1)),rep(0,nrow(df0))),
+          levels= c(0,1),
+          labels=c("NoEditada","Editada"))
+#df<-df[,-1]  # Eliminate Transcipt ID
+df<-cbind(y,df)
+# write.csv2(df,file="DB_v2_50_3_first2000.csv", row.names = FALSE)
+# remove
+
+remove(df0,df1)
+```
+
+
+
+# Handling missing data
+
+## with value -1
+
+They affect the n closest features of each type. For each type of feature, the entire structure (regardless of the local window s) is searched for the n occurrences of that feature closest to the adenosine being looked at and a series of detailed parameters about that particular feature are given in relation to the adenosine being looked at. Some of these values can be negative, others, such as the feature size, can only be positive. Missing values occur when in the entire structure there are less than n occurrences of a specific type of feature, and then there is no choice but to leave them as missing values: all the fields corresponding to that feature are marked with -1, thus You can detect that there are missing values by looking if there is a -1 in a field where there cannot be negatives.
+
+
+```{r}
+# identify missing values: -1 (associated a nClosest) 
+var_closest <- c("ClosestHLSize",
+                "ClosestSSSize",
+                "ClosestILOppositeStrandSize",
+                "ClosestBLOppositeStrandSize"
+                )
+
+#pos_Closest <- matrix(data = vector(mode="logical"), 
+#                      nrow = length(var_closest), ncol= ncol(df))
+
+#for (i in 1:length(var_Closest)){
+#  pos_Closest[i,] <- str_detect(names(df),var_Closest[i])
+#  print(names(df)[pos_Closest[i,]])
+#}
+
+pos_closest_all <- vector(mode = "logical", length = ncol(df))
+
+for (i in 1:length(var_closest)){
+ pos_closest_all <- pos_closest_all | str_detect(names(df),var_closest[i])
+}
+
+# check
+#names(df)[pos_closest_all]
+
+
+```
+
+
+Variables with missing data indicated with the value -1 can be:
+
+`r toString(names(df)[pos_closest_all])`.
+
+The number of -1 values in each variable is:
+
+```{r eval=FALSE}
+varmenos1.names <- c("ClosestHLSize","ClosestILOppositeStrandSize","ClosestBLOppositeStrandSize", "ClosestBLOppositeStrandSize")
+
+varmenos1.pos <- NULL
+for(i in varmenos1.names){
+  varmenos1.pos <- c(varmenos1.pos, str_which(names(df),i))
+}
+# str_which(names(df), "ClosestHLSize")
+
+str_which(names(df), "[ClosestHLSizeClosestILOppositeStrandSize]")
+str_which(names(df), "ClosestHLSize")
+
+```
+
+
+
+
+```{r}
+#summary(df[,params$var.menos1])
+
+# 
+# params$var.menos1 + 1 because  y variable has been added in the first column of df                                                                                                                                                       
+count.menos1 <-
+df %>%
+  select(names(df)[pos_closest_all]) %>%
+  summarise_all(~sum(.x == -1))
+
+count.menos1
+
+#names(df)[str_detect(names(df),"Closest")]
+
+#tests
+#sum(df$X3ClosestSSSize < 2)
+```
+
+The number of variables with some value -1 is: 
+
+**`r sum(count.menos1 > 0)`**
+
+```{r}
+
+# Eliminate observations with -1 values in a nClosest variables 
+
+if (sum(count.menos1) > 0) {
+  
+  # select variables with any values = -1
+  names.menos1 <- names(count.menos1)[which(count.menos1 > 0)]
+  
+  # select observations with any values = -1
+  obs.which.menos1 <- apply(df[,names.menos1],2,function (x) {which(x==-1)})
+  
+  # Create unique list of position
+  obs.elim.menos1 <- unique(unlist(obs.which.menos1))
+  
+  # eliminate observations
+  df <- df[-obs.elim.menos1,]
+}
+
+
+
+```
+
+`r if (sum(count.menos1) > 0) {paste("The deleted observations are the rows: ", toString(obs.elim.menos1))}`
+
+Now,no observations should appear in the variables with values of -1 previously selected.
+
+```{r}
+#check 
+
+count.menos1_check <-
+df %>%
+  select(names(df)[pos_closest_all]) %>%
+  summarise_all(~sum(.x == -1))
+
+count.menos1_check
+```
+
+
+## With NAs
+
+
+They are associated with the window of nucleotides on either side of the adenosine that is being looked at. It affects the localAverageSize and the localMaxSize (for the different feature types). If there is no occurrence of that feature in the local window, the localAverageSize (output as -nan) and the localMaxSize (output as -1) cannot be calculated, therefore there is no choice but to consider them as missing values.
+
+```{r}
+# missing data plot
+#vis_miss(df)
+
+# variables with missing data
+
+gg <- complete.cases(t(df))
+summary(df[,!gg])
+var_mis <- names(df)[!gg]
+
+obsNAs <- is.na(df[,!gg] )
+
+# NA observation in missing variables
+
+if( length(var_mis) == 1) {
+  obsNAs.n <- sum(obsNAs)
+} 
+
+if( length(var_mis) > 1) {
+obsNAs.n <- apply(obsNAs, 2, sum)
+}
+
+limNAs <- 0.1
+elimNAs <- obsNAs.n/nrow(df) > limNAs
+#var_mis[elimNAs]
+# Eliminate missing variables
+if (sum(elimNAs) > 0) {
+  df<-df[,-c(which(colnames(df)%in%var_mis[elimNAs]))]
+}
+# variable with a lot NaN df[,"LocalAvgBLSize"]
+
+# Eliminate observations with missing values
+
+if (sum(elimNAs) < length(var_mis)) {
+   if ((length(var_mis) > 1) & (length(var_mis) - sum(elimNAs) > 1) ) {
+        obsNAs.which <- apply(obsNAs[,!elimNAs], 2, which)
+        obsNAs.elim <- unique(unlist(obsNAs.which))
+   }
+  
+   if ( (length(var_mis) - sum(elimNAs)) == 1 & (sum(elimNAs)>0) ) obsNAs.elim <- which(obsNAs[,which(elimNAs==F)])
+   
+   if (length(var_mis) == 1 ) obsNAs.elim <- which(obsNAs)
+ 
+   
+   
+   
+   df<-df[-obsNAs.elim,]
+
+}
+
+
+```
+
+
+In summary, the variables with missing data NAs are:
+
+`r toString(var_mis)`.
+
+
+
+`r if(sum(elimNAs) > 0){paste0( "Variables are removed ", toString(var_mis[elimNAs]),  " because it exceeds the threshold of ", limNAs*100 , "% missing values")}`
+
+
+
+`r if(sum(elimNAs) == 0) {paste0("No variable is eliminated by NA since it does not exceed the threshold of", limNAs*100, "% missing values")}`
+
+
+`r ifelse((sum(elimNAs) == length(var_mis)), "No records have been deleted", paste0("With the rest of the variables missing, it is decided to eliminate the observations. The total number of observations removed is ",   length(obsNAs.elim), ". belong to ", toString(obsNAs.elim) ))`
+
+
+
+# Removing variables with little variability
+
+
+```{r}
+
+vremove<-nearZeroVar(df, names= TRUE)
+#vremove<-NULL
+
+```
+
+Variables with little variability are:
+
+`r toString(vremove)`
+
+So, they are removed from the data set
+
+```{r}
+
+if (length(vremove) >0 ) df<-df[,-c(which(colnames(df)%in%vremove))]
+
+# more records are deleted
+#df=na.omit(df)
+```
+
+# Check
+
+In this step there does not have to be any registration with NA:
+
+
+```{r}
+msg <- ifelse (nrow(df) == nrow(na.omit(df)), 
+         "There is no record NA",
+         "There is any record NA")
+```
+
+**`r msg`**
+
+
+
+# Renames rows with  ID & PosIn variables
+
+The variables `r toString(params$ID)` will serve to rename each row and will be removed from the data set.
+
+
+
+
+
+
+```{r}
+# sss has the postion of the variables
+sss <- which(names(df)%in%params$ID)
+
+# initial values
+var.ID <- rownames(df)
+
+if(length(sss)==2){
+  var.ID <- paste0(df[,sss[1]],df[,sss[2]])
+}
+if(length(sss)==1){
+  var.ID <- df[,sss]
+}
+# Renames rows
+rownames(df) <- var.ID
+
+# Remove Seq. Name variable 
+
+df <- df[,-sss]
+
+# update list of numerical variables
+#  var.num.1 <- params$var.num - length(params$ID)
+
+# Mostrar registros duplicados
+#dup<- which(var.ID=='ENSTTAG00005000019_1461')
+#df[dup,1:10]
+#sum(df[dup[1],]!=df[dup[2],])
+```
+
+
+# Detect infinite values in Local variables
+
+```{r}
+# Select Local variables
+
+var_local = "Local"
+
+pos_local <- str_detect(names(df),var_local)
+```
+
+The variables are: `r toString(names(df)[pos_local])`
+
+
+
+```{r}
+
+det_inf <- apply(df[,pos_local],2,is.infinite)
+var_inf_n <- apply(det_inf,2,sum)
+var_inf_names <- names(var_inf_n)[var_inf_n>0]
+
+
+# Remove registers
+
+if (length(var_inf_names) == 1) obsinf.elim <- which(det_inf[,var_inf_names])
+   
+if (length(var_inf_names) > 0) df<-df[-obsinf.elim,]
+
+```
+
+
+The variables with **inf** are: `r toString(var_inf_names)`
+
+The total of observations with **inf** are: `r
+toString(var_inf_n[var_inf_n>0])`
+
+
+
+# The final dataset is displayed
+
+It has a dimension of `r dim(df)`.
+
+The variables that are maintained are:
+
+`r toString(names(df))`
+
+```{r}
+df
+```
+
+And the number of observations for each class is:
+
+```{r}
+kable(table(df$y))
+```
+
+
+The file with the final data is
+
+```{r}
+save(df, file=paste0("./", 
+                     params$out_folder , 
+                     "/data_" ,
+                     params$file1,".rda"))
+```
+
+
+
+The descriptive statistics of the remaining variables are:
+
+
+```{r}
+summary(df)
+```
+
+# Principal Component analysis (PCA)
+
+
+The points are colored by the class they correspond to.
+
+
+```{r, eval=FALSE}
+# PCA
+library(pca3d)
+
+
+# Don't consider class
+pca.res<-prcomp(df[,-1],scale=T)  
+
+
+plot(pca.res)
+summary(pca.res)
+
+gr <- df$y
+
+pca2d(pca.res, group=gr, legend="bottomright")
+
+#lot(pca.res$x[,1],pca.res$x[,2],type="n",xlab="Dim1",ylab="Dim2")
+#points(pca.res$x[,1],pca.res$x[,2],col=as.factor(df$y))
+
+# look for outliers
+# anomalo <- which(pca.res$x[,1:2]< -60)
+# df[anomalo,]
+
+```
+
+# PCA biplot
+
+```{r, eval=FALSE}
+# biplot
+pca2d(pca.res, group=gr, biplot=TRUE, biplot.vars=5, legend="bottomright")
+#biplot(pca.res,cex=0.75)
+```
+
+# Train/test Sampling
+
+The data percentage for train is `r params$p.train * 100` % which corresponds to a total of `r floor(nrow(df)*params$p.train)` records.
+
+
+
+```{r}
+# train / test
+set.seed(params$seed.train)
+
+train <- sample(1:nrow(df),floor(nrow(df)*params$p.train))
+df_train <- df[train,]
+df_test<- df[-train,]
+```
+
+# Random forests
+
+```{r}
+mtry <-2 
+ntree <- 1000
+```
+
+As a first evaluation, the random forests algorithm is applied to the train data with the values of ntree = **`r ntree`** and mtry = **`r mtry`**.
+
+
+
+```{r rf}
+rf_classifier = randomForest(y ~ ., data=df_train, ntree=ntree, mtry=mtry, importance=TRUE)
+
+rf_classifier
+
+plot(rf_classifier)
+
+```
+
+
+```{r}
+ntree.opt <- which.min(rf_classifier$err.rate[,1])
+
+```
+
+
+The optimal number of trees value is **`r ntree.opt`** with an OOB error of **`r rf_classifier$err.rate[ntree.opt,1]`**.
+
+
+# Tuning the number of variables available in each node
+
+We are looking for the optimal value of mtry.
+
+```{r tunning}
+mtry_sel <- c(2,4,5,7,9,13,17,19,25,30,40,50,60,90,110,120,ncol(df))
+#mtry_sel <- c(1,2,3,4,5,7)
+oob.err=double(length(mtry_sel))
+test.err=double(length(mtry_sel))
+
+n <- 0
+##mtry is no of Variables randomly chosen at each split
+for(mtry in mtry_sel) 
+{
+  n <- n +1
+  rf=randomForest(y ~ ., data=df_train, mtry=mtry,ntree=ntree.opt) 
+  oob.err[n] = rf$err.rate[ntree.opt,1] 
+  
+  pred<-predict(rf,df_test) #Predictions on Test Set for each sample
+  test.err[n]=  1-confusionMatrix(pred,df_test[,1])$overall[1]#accuracy
+  
+  cat(mtry," ") #printing the output to the console
+}
+
+matplot(mtry_sel, cbind(oob.err,test.err), pch=19 , col=c("red","blue"),type="b",ylab="% error",xlab="Number of Predictors Considered at each Split")
+legend("bottomright",legend=c("Out of Bag Error","Test Error"),pch=19, col=c("red","blue"))
+
+```
+
+
+```{r}
+mtry.opt <- mtry_sel[which.min(test.err)]
+```
+
+It is expected that the test error curve will be greater than the OOB curve although it is true that in both cases registers not used for learning are used.
+
+The minimum value of test.err is `r min(test.err)` which corresponds to mtry equal to `r mtry.opt` that will be used in the prediction.
+
+
+# Prediction with test data
+
+The test data is `r nrow(df_test)` records and is a `r 1 - params$p.train * 100` % of all data.
+
+it will be used as hyperparameter values
+
+ntree = `r ntree.opt`
+
+mtry = `r mtry.opt`
+
+
+
+```{r prediction}
+# Prediction
+
+rf=randomForest(y ~ ., data=df_train, mtry=mtry.opt ,ntree=ntree.opt) 
+rf
+
+
+save(rf, file= paste0("./", 
+                      params$out_folder, 
+                      "/rf_", 
+                      params$file1,".rda"))
+
+
+varImpPlot(rf, cex=0.8)
+
+#Show the k tree
+#getTree(rf, k=1, labelVar = TRUE)
+
+tree_func(rf,1)
+ggsave(tree_func(rf,1),file="test.png",width=12,height=8)
+
+pred<-predict(rf,df_test) #Predictions on Test Set for each sample
+confusionMatrix(pred,df_test[,1])
+
+
+```
+
+
+# Robustness of the selected variables
+
+The process has consisted of repeating the classification algorithm `r params$repl` times performing a new train/test with the ntree and mtry values obtained previously:
+
+ntree = `r ntree.opt`
+
+mtry = `r mtry.opt`
+
+
+```{r robustez, eval=TRUE}
+
+matrix.importance <- matrix(0,nrow=params$repl,ncol=params$nvar)
+
+for (i in 1:params$repl) {
+  # Train/test
+  train <- sample(1:nrow(df),
+                  floor(nrow(df)*params$p.train))
+  df_train <- df[train,]
+  df_test<- df[-train,]
+  rf <- randomForest(y ~ ., 
+                     data=df_train,
+                     mtry=mtry.opt,
+                     ntree=ntree.opt,
+                     importance=TRUE)
+  impo <- importance(rf)[,4]
+  #colnames(importance(rf))[4]
+  matrix.importance[i,] <- names((rev(sort(impo)))[1:params$nvar])
+}
+#colnames(importance(rf))
+#rownames(importance(rf))
+cat("Measure of importance:", colnames(importance(rf))[4])
+
+# Ranking of the most robust variables
+top_i <- 1
+top_f <- 3
+
+cat("The ", params$nvar, " variables more repeated from  ", top_i , " to ", 
+    top_f, "in each iteraction")
+
+top.importance <- matrix.importance[,top_i:top_f]
+(top10.importance <- rev(sort(table(top.importance)))[1:params$nvar])
+var.unicos.ordenados <- unique(names(rev(sort(table(matrix.importance)))))
+
+barplot(rev(sort(table(matrix.importance)/(params$nvar*params$repl)*params$repl)), axisnames = FALSE, 
+       ylab="% of times that a variable appears on the top 30", col="darkblue")
+legend("topright", var.unicos.ordenados, cex=0.50)
+
+```
+
+
+# Boxplot of some highlighted variables
+
+
+```{r boxplot, eval =TRUE}
+# boxplot
+
+# If there is no variable, NA appears and then gives an error in the boxplot
+# It is corrected only by showing the variables without NA: !is.na(top10.importance)
+
+for (i in names(top10.importance)[!is.na(top10.importance)]){
+#i <- names(top10.importance)[4]
+  boxplot(df_test[,i]  ~ df_test$y, main=i  )
+}
+
+
+```
+
