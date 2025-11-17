@@ -55,20 +55,20 @@ struct comparer
     }
 };
 
-//a functions that transforms a sequence into its complementary
-string complementary_seq(const string &seq) {
+//a functions that transforms a sequence into its reverse complementary
+string reverse_complementary_seq(const string &seq) {
     string cmp(seq);
     char c;
     for (int i = 0; i < seq.length(); i++) {
         c = seq[i];
-        if (c == 'A') cmp[i] = 'T';
-        else if (c == 'a') cmp[i] = 't';
-        else if (c == 'T') cmp[i] = 'A';
-        else if (c == 't') cmp[i] = 'a';
-        else if (c == 'G') cmp[i] = 'C';
-        else if (c == 'g') cmp[i] = 'c';
-        else if (c == 'C') cmp[i] = 'G';
-        else if (c == 'c') cmp[i] = 'g';
+        if (c == 'A') cmp[cmp.size() - i - 1] = 'T';
+        else if (c == 'a') cmp[cmp.size() - i - 1] = 't';
+        else if (c == 'T') cmp[cmp.size() - i - 1] = 'A';
+        else if (c == 't') cmp[cmp.size() - i - 1] = 'a';
+        else if (c == 'G') cmp[cmp.size() - i - 1] = 'C';
+        else if (c == 'g') cmp[cmp.size() - i - 1] = 'c';
+        else if (c == 'C') cmp[cmp.size() - i - 1] = 'G';
+        else if (c == 'c') cmp[cmp.size() - i - 1] = 'g';
     }
     return cmp;
 }
@@ -79,15 +79,15 @@ int main (int argc, char* argv[]) {
     if (argc == 2) {
         string par(argv[1]);
         if (par == "-h") {
-            cout << "Usage: " << argv[0] << " filtered_variants_size genome_fasta_file gtf_file [options]" << endl;
-            cout << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)   -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default" << endl;
+            cout << "Usage: " << argv[0] << " filtered_variants_file genome_fasta_file gtf_file [options]" << endl;
+            cout << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)   -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default    -p if the fasta header contains extra information after the chromosome/scaffold id" << endl;
             return 0;
         }
     }
     //checking minimum number of arguments
     if (argc < 4) {
-        cerr << "Usage: " << argv[0] << " filtered_variants_size genome_fasta_file gtf_file [options]" << endl;
-        cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)    -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default" << endl;
+        cerr << "Usage: " << argv[0] << " filtered_variants_file genome_fasta_file gtf_file [options]" << endl;
+        cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)   -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default    -p if the fasta header contains extra information after the chromosome/scaffold id" << endl;
         return 1;
     }
     //getting the input file paths from the first 3 arguments
@@ -112,14 +112,14 @@ int main (int argc, char* argv[]) {
             else if (opt.compare("-f") == 0) gff = true;
             else if (opt.compare("-p") == 0) parse_fasta_title = true;
             else {
-                cerr << "Usage: " << argv[0] << " filtered_variants_size genome_fasta_file gtf_file [options]" << endl;
-                cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)    -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default" << endl;
+                cerr << "Usage: " << argv[0] << " filtered_variants_file genome_fasta_file gtf_file [options]" << endl;
+                cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)   -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default    -p if the fasta header contains extra information after the chromosome/scaffold id" << endl;
                 return 1;
             }
         }
         else {
-            cerr << "Usage: " << argv[0] << " filtered_variants_size genome_fasta_file gtf_file  [options]" << endl;
-            cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)    -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default" << endl;
+            cerr << "Usage: " << argv[0] << " filtered_variants_file genome_fasta_file gtf_file  [options]" << endl;
+            cerr << "Options: -s followed by the transcript size treshold over which the genes will be ignored    -n followed by the percentage of Ns in a transcript over which a gene will be ignored     -c followed by the maximum chromosome or scaffold size (for efficiency reasons)   -g if entire gene locus are annotated in the gtf or gff (one gene entry per gene id)    -f if the gene annotation file is in gff format (gtf by default    -p if the fasta header contains extra information after the chromosome/scaffold id" << endl;
             return 1;
         }
     }
@@ -289,7 +289,7 @@ int main (int argc, char* argv[]) {
                     int end = gtf_it->second[i].gtf_end;
                     string seq(fas_it->second, start - 1, end - start + 1);
                     //if necessary, we transform the sequence into the complementary
-                    if (not gtf_it->second[i].positive_strand) seq = complementary_seq(seq);
+                    if (not gtf_it->second[i].positive_strand) seq = reverse_complementary_seq(seq);
                     //if the options are active, we check for the minimum size and maximum percentage of Ns in the sequence, to ignore it if necessary
                     bool ignore_s = false;
                     bool ignore_n = false;
